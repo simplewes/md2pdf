@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Markdown to PDF</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.2/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
     <style>
         :root {
             --bg-primary: #f5f5f5;
@@ -334,8 +335,30 @@
             transition: border-color 0.3s ease;
         }
 
+        /* Mermaid diagram styling */
+        #preview .mermaid {
+            display: flex;
+            justify-content: center;
+            margin: 1em 0;
+        }
+
+        #preview .mermaid svg {
+            max-width: 100%;
+            height: auto;
+        }
+
         /* Print-specific optimizations for PDF */
         @media print {
+            /* Ensure Mermaid diagrams print correctly */
+            #preview .mermaid,
+            #preview .mermaid svg {
+                page-break-inside: avoid;
+                break-inside: avoid;
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+                color-adjust: exact;
+            }
+
             /* Prevent page breaks inside elements to avoid cutting lines in half */
             #preview h1, #preview h2, #preview h3, #preview h4,
             #preview p, #preview li, #preview blockquote,
@@ -426,6 +449,13 @@
             #preview hr {
                 margin: 1em 0;
             }
+
+            /* Firefox-specific print fixes */
+            @-moz-document url-prefix() {
+                #preview * {
+                    -moz-print-color-adjust: exact;
+                }
+            }
         }
     </style>
 </head>
@@ -446,6 +476,20 @@ This is a sample document to demonstrate the Material Design styling.
 - *Modern color scheme* inspired by Material Design
 - `Code highlighting` for technical content
 - Professional table formatting
+- **Mermaid diagrams** for flowcharts and visualizations
+
+### Mermaid Diagram Example
+```mermaid
+graph LR
+    A[Markdown Input] --> B[marked.js Parser]
+    B --> C[HTML Preview]
+    C --> D[Browser Print]
+    D --> E[PDF Output]
+    style A fill:#1976d2,color:#fff
+    style E fill:#1976d2,color:#fff
+```
+
+> **Note on Mermaid Diagrams**: Diagrams render perfectly in the browser preview but may not appear in PDF output due to browser print API limitations with dynamic SVG content. For documents requiring diagrams in PDF, consider capturing screenshots of diagrams separately.
 
 ### Code Example
 ```javascript
@@ -461,7 +505,7 @@ function hello() {
 | API Integration | In Progress | High |
 | UI Polish | Planned | Medium |
 
-> **Note**: This template works great for technical documentation, reports, and user guides.
+> **Note**: This template works great for technical documentation, reports, and user guides. Supports Mermaid diagrams for flowcharts, sequence diagrams, and more!
 
 For more information, visit [our website](https://example.com).</textarea>
         </div>
@@ -521,6 +565,10 @@ For more information, visit [our website](https://example.com).</textarea>
                 document.documentElement.removeAttribute('data-theme');
                 localStorage.removeItem('theme');
             }
+            
+            // Reinitialize Mermaid with new theme
+            initMermaid();
+            updatePreview();
         }
 
         // Listen for system theme changes
@@ -529,21 +577,103 @@ For more information, visit [our website](https://example.com).</textarea>
             if (!savedTheme) {
                 // Only react to system changes if user hasn't set a preference
                 document.documentElement.removeAttribute('data-theme');
+                initMermaid();
+                updatePreview();
             }
         });
 
         // Initialize theme on page load
         initTheme();
 
-        function updatePreview() {
+        // Mermaid configuration
+        function getMermaidTheme() {
+            const currentTheme = document.documentElement.getAttribute('data-theme');
+            const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            
+            // Determine if we should use dark theme
+            const isDark = currentTheme === 'dark' || 
+                          (currentTheme !== 'light' && systemPrefersDark);
+            
+            return isDark ? 'dark' : 'default';
+        }
+
+        function initMermaid() {
+            mermaid.initialize({
+                startOnLoad: false,
+                theme: getMermaidTheme(),
+                securityLevel: 'loose',
+                fontFamily: 'Segoe UI, Roboto, Helvetica Neue, Arial, sans-serif'
+            });
+        }
+
+        initMermaid();
+
+        async function updatePreview() {
             const markdown = textarea.value;
             preview.innerHTML = marked.parse(markdown);
+            
+            // Render mermaid diagrams - process each code block
+            const mermaidBlocks = preview.querySelectorAll('pre code.language-mermaid');
+            
+            for (let i = 0; i < mermaidBlocks.length; i++) {
+                const codeBlock = mermaidBlocks[i];
+                const preElement = codeBlock.parentElement;
+                const mermaidCode = codeBlock.textContent;
+                
+                try {
+                    // Create a unique ID for this diagram
+                    const id = `mermaid-${Date.now()}-${i}`;
+                    
+                    // Create a div to hold the rendered diagram
+                    const mermaidDiv = document.createElement('div');
+                    mermaidDiv.className = 'mermaid';
+                    mermaidDiv.id = id;
+                    mermaidDiv.textContent = mermaidCode;
+                    
+                    // Replace the pre/code block with the mermaid div
+                    preElement.replaceWith(mermaidDiv);
+                    
+                    // Render this specific diagram
+                    await mermaid.run({
+                        nodes: [mermaidDiv]
+                    });
+                } catch (e) {
+                    console.error('Mermaid rendering error:', e);
+                    // Keep the original code block if rendering fails
+                }
+            }
         }
 
         textarea.addEventListener('input', updatePreview);
         updatePreview();
 
-        function downloadPDF() {
+        // Ensure Mermaid diagrams are rendered before printing
+        let isRenderingMermaid = false;
+        
+        window.addEventListener('beforeprint', async (e) => {
+            if (isRenderingMermaid) return;
+            
+            // Check if there are any mermaid divs that need rendering
+            const mermaidDivs = preview.querySelectorAll('.mermaid:not([data-processed])');
+            if (mermaidDivs.length > 0) {
+                isRenderingMermaid = true;
+                try {
+                    await mermaid.run({ nodes: Array.from(mermaidDivs) });
+                } catch (e) {
+                    console.error('Print preparation error:', e);
+                }
+                isRenderingMermaid = false;
+            }
+        });
+        
+        async function downloadPDF() {
+            // Ensure all diagrams are rendered before opening print dialog
+            const unrenderedMermaid = preview.querySelectorAll('.mermaid:not([data-processed])');
+            if (unrenderedMermaid.length > 0) {
+                await mermaid.run({ nodes: Array.from(unrenderedMermaid) });
+                // Small delay to ensure DOM is updated
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
             window.print();
         }
     </script>
